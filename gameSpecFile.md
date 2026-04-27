@@ -26,3 +26,11 @@ There should be three kind of fish:
 
 ### The rocks
 The rocks should lay on the ground of the sea bottom, some of them reaching higher, some lower! They can even reach almost to the surface where the spearfisher has to swim completly to the surface.
+
+
+### Audio
+The main theme should be a nice retro underwater world sound/ song.
+When the spearfisher hits a rock there should be a "Ouch!" Sound.
+When the spearfisher fires his gun there should be a firing sound.
+When the spearfisher catches a fish, there should be a scoring sound.
+When the spearfisher runs out of breath, there should be a adequate sound.
