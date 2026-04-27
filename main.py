@@ -77,6 +77,12 @@ SCARE_FLEE_SPEED = 6
 # Grouper attraction
 GROUPER_ATTRACT_SPEED = 0.8
 
+# Touch controls
+JOYSTICK_CENTER = (120, SCREEN_HEIGHT - 120)
+JOYSTICK_RADIUS = 60
+FIRE_BUTTON_CENTER = (SCREEN_WIDTH - 90, SCREEN_HEIGHT - 120)
+FIRE_BUTTON_RADIUS = 45
+
 # ---------------------------------------------------------------------------
 # Helper – draw pixel-art style shapes
 # ---------------------------------------------------------------------------
@@ -306,6 +312,13 @@ async def main():
     med_font = pygame.font.SysFont("consolas", 28)
     small_font = pygame.font.SysFont("consolas", 14)
 
+    # Touch / joystick state
+    touch_move = [0, 0]  # normalised dx, dy  (-1..1)
+    touch_fire = False
+    touch_joy_active = False  # is finger on joystick
+    touch_joy_id = None
+    touch_knob = list(JOYSTICK_CENTER)  # visual knob position
+
     # Load sounds (with browser fallback)
     snd_fire = _safe_sound(create_fire_sound)
     snd_ouch = _safe_sound(create_ouch_sound)
@@ -377,9 +390,76 @@ async def main():
         now = pygame.time.get_ticks()
 
         # --- Events ---
+        touch_fire = False
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+
+            # --- Touch / mouse handling ---
+            if event.type in (pygame.FINGERDOWN, pygame.MOUSEBUTTONDOWN):
+                if event.type == pygame.FINGERDOWN:
+                    tx = event.x * SCREEN_WIDTH
+                    ty = event.y * SCREEN_HEIGHT
+                    tid = event.finger_id
+                else:
+                    tx, ty = event.pos
+                    tid = -1
+
+                if g["state"] in ("menu", "gameover"):
+                    # Tap anywhere acts as ENTER
+                    if g["state"] == "menu":
+                        g = reset_game()
+                        g["state"] = "playing"
+                    elif g["state"] == "gameover":
+                        g = reset_game()
+                        g["state"] = "playing"
+                elif g["state"] == "playing":
+                    # Check joystick area
+                    jdx = tx - JOYSTICK_CENTER[0]
+                    jdy = ty - JOYSTICK_CENTER[1]
+                    if math.hypot(jdx, jdy) <= JOYSTICK_RADIUS * 1.5:
+                        touch_joy_active = True
+                        touch_joy_id = tid
+                    # Check fire button
+                    elif math.hypot(tx - FIRE_BUTTON_CENTER[0], ty - FIRE_BUTTON_CENTER[1]) <= FIRE_BUTTON_RADIUS * 1.3:
+                        touch_fire = True
+
+            if event.type in (pygame.FINGERMOTION, pygame.MOUSEMOTION):
+                if event.type == pygame.FINGERMOTION:
+                    tx = event.x * SCREEN_WIDTH
+                    ty = event.y * SCREEN_HEIGHT
+                    tid = event.finger_id
+                else:
+                    tx, ty = event.pos
+                    tid = -1
+                    if not pygame.mouse.get_pressed()[0]:
+                        continue
+
+                if touch_joy_active and tid == touch_joy_id:
+                    jdx = tx - JOYSTICK_CENTER[0]
+                    jdy = ty - JOYSTICK_CENTER[1]
+                    dist = math.hypot(jdx, jdy)
+                    if dist > JOYSTICK_RADIUS:
+                        jdx = jdx / dist * JOYSTICK_RADIUS
+                        jdy = jdy / dist * JOYSTICK_RADIUS
+                    touch_move[0] = jdx / JOYSTICK_RADIUS
+                    touch_move[1] = jdy / JOYSTICK_RADIUS
+                    touch_knob[0] = JOYSTICK_CENTER[0] + jdx
+                    touch_knob[1] = JOYSTICK_CENTER[1] + jdy
+
+            if event.type in (pygame.FINGERUP, pygame.MOUSEBUTTONUP):
+                if event.type == pygame.FINGERUP:
+                    tid = event.finger_id
+                else:
+                    tid = -1
+                if tid == touch_joy_id:
+                    touch_joy_active = False
+                    touch_joy_id = None
+                    touch_move[0] = 0
+                    touch_move[1] = 0
+                    touch_knob[0] = JOYSTICK_CENTER[0]
+                    touch_knob[1] = JOYSTICK_CENTER[1]
+
             if event.type == pygame.KEYDOWN:
                 if g["state"] == "menu" and event.key == pygame.K_RETURN:
                     g = reset_game()
@@ -411,14 +491,37 @@ async def main():
 
             # --- Player movement ---
             keys = pygame.key.get_pressed()
+            dx = 0
+            dy = 0
             if keys[pygame.K_UP] or keys[pygame.K_w]:
-                g["py"] = max(SURFACE_Y - 5, g["py"] - PLAYER_SPEED)  # allow going to surface
+                dy -= 1
             if keys[pygame.K_DOWN] or keys[pygame.K_s]:
-                g["py"] = min(SCREEN_HEIGHT - PLAYER_BODY_H - 5, g["py"] + PLAYER_SPEED)
+                dy += 1
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                g["px"] = max(5, g["px"] - PLAYER_SPEED)
+                dx -= 1
             if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                g["px"] = min(SCREEN_WIDTH // 2, g["px"] + PLAYER_SPEED)
+                dx += 1
+            # Merge touch input
+            dx += touch_move[0]
+            dy += touch_move[1]
+            # Clamp
+            dx = max(-1, min(1, dx))
+            dy = max(-1, min(1, dy))
+            g["py"] = max(SURFACE_Y - 5, min(SCREEN_HEIGHT - PLAYER_BODY_H - 5, g["py"] + dy * PLAYER_SPEED))
+            g["px"] = max(5, min(SCREEN_WIDTH // 2, g["px"] + dx * PLAYER_SPEED))
+
+            # Touch fire
+            if touch_fire and g["spear"] is None and now - g["last_spear_time"] > SPEAR_COOLDOWN:
+                gun_tip = g["px"] + 32 + PLAYER_BODY_W
+                g["spear"] = {
+                    "x": gun_tip,
+                    "y": g["py"] + 6,
+                    "state": "out",
+                    "caught_fish": None,
+                    "origin_x": gun_tip,
+                }
+                g["last_spear_time"] = now
+                snd_fire.play()
 
             # Player movement magnitude this frame
             player_move = abs(g["px"] - g["prev_px"]) + abs(g["py"] - g["prev_py"])
@@ -633,6 +736,23 @@ async def main():
                 screen.blit(go_txt, (SCREEN_WIDTH // 2 - go_txt.get_width() // 2, 200))
                 screen.blit(sc_txt, (SCREEN_WIDTH // 2 - sc_txt.get_width() // 2, 270))
                 screen.blit(re_txt, (SCREEN_WIDTH // 2 - re_txt.get_width() // 2, 330))
+
+        # Draw touch controls (always on top, semi-transparent)
+        if g["state"] == "playing":
+            tc_surf = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+            # Joystick base
+            pygame.draw.circle(tc_surf, (255, 255, 255, 40), JOYSTICK_CENTER, JOYSTICK_RADIUS)
+            pygame.draw.circle(tc_surf, (255, 255, 255, 80), JOYSTICK_CENTER, JOYSTICK_RADIUS, 2)
+            # Joystick knob
+            pygame.draw.circle(tc_surf, (255, 255, 255, 120), (int(touch_knob[0]), int(touch_knob[1])), 22)
+            # Fire button
+            pygame.draw.circle(tc_surf, (255, 80, 80, 60), FIRE_BUTTON_CENTER, FIRE_BUTTON_RADIUS)
+            pygame.draw.circle(tc_surf, (255, 80, 80, 120), FIRE_BUTTON_CENTER, FIRE_BUTTON_RADIUS, 3)
+            # Label
+            fire_lbl = small_font.render("FIRE", True, (255, 255, 255, 200))
+            tc_surf.blit(fire_lbl, (FIRE_BUTTON_CENTER[0] - fire_lbl.get_width() // 2,
+                                     FIRE_BUTTON_CENTER[1] - fire_lbl.get_height() // 2))
+            screen.blit(tc_surf, (0, 0))
 
         pygame.display.flip()
         await asyncio.sleep(0)
