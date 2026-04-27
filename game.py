@@ -2,6 +2,7 @@ import pygame
 import random
 import sys
 import math
+import asyncio
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -191,7 +192,7 @@ def draw_breath_bar(surface, breath, max_breath, x, y, w, h):
 # Main Game
 # ---------------------------------------------------------------------------
 
-def main():
+async def main():
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
     pygame.display.set_caption("Spearfisherz")
@@ -502,10 +503,11 @@ def main():
                 screen.blit(re_txt, (SCREEN_WIDTH // 2 - re_txt.get_width() // 2, 330))
 
         pygame.display.flip()
+        await asyncio.sleep(0)
 
     pygame.quit()
     sys.exit()
 
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
